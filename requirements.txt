@@ -59,5 +59,6 @@ ujson
 urllib3
 vine
 wcwidth
+websockets
 zope.interface
 

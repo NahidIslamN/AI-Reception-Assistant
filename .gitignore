@@ -53,3 +53,13 @@ celerybeat.pid
 # OS files
 .DS_Store
 Thumbs.db
+
+
+# Ignore HTML files
+*.html
+
+# Ignore Java compiled files
+*.css
+
+# Ignore JavaScript files
+*.js

@@ -9,7 +9,7 @@ class Visitor(models.Model):
     phone = models.CharField(max_length=20)
     conversission = models.TextField(blank=True)
 
-    def __str__(self, request):
-        return f"{self.name}-+-{self.email}-+-{self.phone}"
+    def __str__(self):
+        return f"{self.name or 'Visitor'} - {self.email}"
 
   
