@@ -1,0 +1,31 @@
+step 1:
+
+copy all file and folder which are nessary for the template
+
+
+step 2:
+
+replace all keyword "DjangoApp" to "Your project name" form settings.py and celery.py
+
+Goto the chats app and views there replase DjangoApp to "your Project Name"
+
+and replace "Chat App" keyword to "Your project name" form views.py
+ 
+
+step 3:
+
+create   .env file
+
+
+step 4:
+
+migrations and migrate
+
+
+
+
+
+python manage.py runserver
+
+# this one for
+celery -A AI_Strming worker -B --loglevel=info
