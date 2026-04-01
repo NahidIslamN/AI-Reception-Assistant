@@ -5,16 +5,20 @@ from django.db import models
 class ImagesFiles(models.Model):
     file = models.ImageField(upload_to='images')
 
+
+class Files(models.Model):
+    file = models.FileField(upload_to='images')
+
+
 class Features(models.Model):
     features_heading = models.CharField(max_length=250)
     discription = models.TextField(blank=True)
-    images = models.ManyToManyField(ImagesFiles, blank=True, related_name='features-images')
+    images = models.ManyToManyField(ImagesFiles, blank=True, related_name='features_images')
 
     def __str__ (self, request):
 
         return self.features_heading
    
-
 
 class Projects(models.Model):
     project_name = models.CharField(max_length=250)
@@ -22,7 +26,16 @@ class Projects(models.Model):
     value_max = models.DecimalField(max_digits=9, decimal_places=2, default=0.00)
     value_min = models.DecimalField(max_digits=9, decimal_places=2, default=0.00)
     features = models.ManyToManyField(Features, blank=True, related_name='features')
-    
     def __str__ (self, request):
 
         return self.project_name
+
+
+class Content(models.Model):
+    content_name = models.CharField(max_length=250, null=True, blank=True)
+    discription = models.TextField(blank=True)
+    content_type = models.CharField(max_length=250, null=True, blank=True)
+    contents = models.ManyToManyField(Files, blank=True, related_name='content_images')
+    def __str__(self, request):
+        return self.content_name
+    
