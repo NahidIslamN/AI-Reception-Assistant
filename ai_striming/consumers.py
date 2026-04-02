@@ -17,8 +17,6 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
         self.openai_ws = None
         self.openai_listener_task = None
         self.conversation_lines = []
-        self.pending_audio_chunks = 0
-        self.pending_audio_ms = 0.0
         self.response_in_progress = False
 
         if not visitor_id:
@@ -71,51 +69,17 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
                 return
 
             await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.append", "audio": audio_chunk}))
-            self.pending_audio_chunks += 1
-            self.pending_audio_ms += self.estimate_audio_ms(audio_chunk)
             return
 
         if action_type == "commit":
-            if self.response_in_progress:
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "info",
-                            "message": "response_in_progress",
-                        }
-                    )
-                )
-                return
-
-            if self.pending_audio_chunks < 1 or self.pending_audio_ms < 120:
-                await self.send(
-                    text_data=json.dumps(
-                        {
-                            "type": "info",
-                            "message": "not_enough_audio",
-                        }
-                    )
-                )
-                return
-
-            await self.openai_ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
-            await self.openai_ws.send(
-                json.dumps(
+            await self.send(
+                text_data=json.dumps(
                     {
-                        "type": "response.create",
-                        "response": {
-                            "modalities": ["audio", "text"],
-                            "instructions": payload.get(
-                                "instructions",
-                                "Talk naturally and provide complete, detailed responses.",
-                            ),
-                        },
+                        "type": "info",
+                        "message": "manual_commit_disabled_server_vad_enabled",
                     }
                 )
             )
-            self.pending_audio_chunks = 0
-            self.pending_audio_ms = 0.0
-            self.response_in_progress = True
             return
 
         if action_type == "text":
@@ -163,27 +127,45 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
             return
 
         api_key = config("OPENAI_API_KEY", default="")
-        model = config("OPENAI_REALTIME_MODEL", default="gpt-4o-realtime-preview")
         if not api_key:
             await self.send_json_error("OPENAI_API_KEY is missing")
             return
 
-        url = f"wss://api.openai.com/v1/realtime?model={model}"
-        try:
-            self.openai_ws = await websockets.connect(
-                url,
-                additional_headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "OpenAI-Beta": "realtime=v1",
-                },
-                ping_interval=20,
-                ping_timeout=20,
-            )
-        except Exception as exc:
-            await self.send_json_error(f"failed to connect realtime api: {str(exc)}")
+        preferred_model = config("OPENAI_REALTIME_MODEL", default="gpt-4o-realtime-preview")
+        model_candidates = [preferred_model, "gpt-4o-realtime-preview", "gpt-realtime"]
+        connection_errors = []
+
+        for model in dict.fromkeys(model_candidates):
+            url = f"wss://api.openai.com/v1/realtime?model={model}"
+            for attempt in range(1, 4):
+                try:
+                    self.openai_ws = await websockets.connect(
+                        url,
+                        additional_headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "OpenAI-Beta": "realtime=v1",
+                        },
+                        open_timeout=30,
+                        close_timeout=10,
+                        ping_interval=20,
+                        ping_timeout=20,
+                    )
+                    break
+                except Exception as exc:
+                    connection_errors.append(f"model={model}, attempt={attempt}, error={str(exc)}")
+                    await asyncio.sleep(0.8)
+
+            if self.openai_ws:
+                break
+
+        if not self.openai_ws:
+            details = " | ".join(connection_errors[-3:]) if connection_errors else "unknown error"
+            await self.send_json_error(f"failed to connect realtime api after retries: {details}")
             return
 
         self.openai_listener_task = asyncio.create_task(self.listen_openai())
+        await self.configure_openai_session()
+        await self.send_initial_english_greeting()
         await self.send(text_data=json.dumps({"type": "ready"}))
 
     async def listen_openai(self):
@@ -251,6 +233,61 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
     @staticmethod
     def now_iso():
         return datetime.utcnow().isoformat()
+
+    async def configure_openai_session(self):
+        if not self.openai_ws:
+            return
+
+        session_instructions = (
+            "You are a professional AI receptionist assistant for a business. "
+            "Rules: "
+            "(1) First greeting must be in English only. "
+            "(2) After that, listen to user speech and respond in the same language the user speaks. "
+            "(3) If speech is unclear, noisy, or not a valid question, do not invent answers; ask for clarification briefly. "
+            "(4) Never keep talking repeatedly without a clear user request. "
+            "(5) Keep answers accurate, business-friendly, very concise, and low-latency."
+        )
+
+        await self.openai_ws.send(
+            json.dumps(
+                {
+                    "type": "session.update",
+                    "session": {
+                        "modalities": ["audio", "text"],
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "input_audio_transcription": {"model": "whisper-1"},
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.45,
+                            "prefix_padding_ms": 180,
+                            "silence_duration_ms": 350,
+                            "create_response": True,
+                            "interrupt_response": True,
+                        },
+                        "temperature": 0.6,
+                        "max_response_output_tokens": 100,
+                        "instructions": session_instructions,
+                    },
+                }
+            )
+        )
+
+    async def send_initial_english_greeting(self):
+        if not self.openai_ws:
+            return
+
+        await self.openai_ws.send(
+            json.dumps(
+                {
+                    "type": "response.create",
+                    "response": {
+                        "modalities": ["audio", "text"],
+                        "instructions": "Say one short greeting in English and ask the user to speak.",
+                    },
+                }
+            )
+        )
 
     @staticmethod
     def estimate_audio_ms(base64_audio: str) -> float:
