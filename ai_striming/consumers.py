@@ -245,7 +245,7 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
             "(2) After that, listen to user speech and respond in the same language the user speaks. "
             "(3) If speech is unclear, noisy, or not a valid question, do not invent answers; ask for clarification briefly. "
             "(4) Never keep talking repeatedly without a clear user request. "
-            "(5) Keep answers accurate, business-friendly, very concise, and low-latency."
+            "(5) Keep answers accurate, business-friendly, and concise."
         )
 
         await self.openai_ws.send(
@@ -259,14 +259,12 @@ class RealtimeVoiceConsumer(AsyncWebsocketConsumer):
                         "input_audio_transcription": {"model": "whisper-1"},
                         "turn_detection": {
                             "type": "server_vad",
-                            "threshold": 0.25,
-                            "prefix_padding_ms": 180,
-                            "silence_duration_ms": 250,
+                            "threshold": 0.35,
+                            "prefix_padding_ms": 500,
+                            "silence_duration_ms": 700,
                             "create_response": True,
                             "interrupt_response": True,
                         },
-                        "temperature": 0.4,
-                        "max_response_output_tokens": 100,
                         "instructions": session_instructions,
                     },
                 }
